@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>數位鏡像系統 V4 - 穩定版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 基礎設定：防止縮放與誤選 */
+        * {
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            touch-action: manipulation;
+        }
+
+        body {
+            background-color: #000;
+            color: #fff;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        /* 視訊顯示區 */
+        #displayArea {
+            flex: 1;
+            position: relative;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+        }
+
+        canvas {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+
+        /* 控制面板：抽屜式設計 */
+        #controlPanel {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: #1e293b;
+            border-top: 1px solid #334155;
+            transition: transform 0.3s ease-in-out;
+            z-index: 1000; /* 極高層級 */
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* 收合狀態位移 */
+        .panel-collapsed {
+            transform: translateY(calc(100% - 48px));
+        }
+
+        /* 頂部切換把手 */
+        #toggleBtn {
+            height: 48px;
+            background: #334155;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            gap: 8px;
+            color: #94a3b8;
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        /* 選單內容區 */
+        #menuContent {
+            padding: 20px;
+            padding-bottom: calc(30px + env(safe-area-inset-bottom));
+            max-height: 60vh;
+            overflow-y: auto;
+            background: #1e293b;
+        }
+
+        /* 按鈕樣式 */
+        .btn-group {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+
+        .btn-item {
+            flex: 1;
+            padding: 12px 8px;
+            background: #334155;
+            border: 2px solid transparent;
+            border-radius: 12px;
+            color: #94a3b8;
+            font-size: 14px;
+            font-weight: 600;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-item.active {
+            background: #2563eb;
+            color: white;
+            border-color: #60a5fa;
+        }
+
+        /* 下拉選單 */
+        select {
+            width: 100%;
+            padding: 14px;
+            background: #334155;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            margin-top: 8px;
+            appearance: none;
+        }
+
+        /* 標籤 */
+        .section-label {
+            font-size: 12px;
+            font-weight: 800;
+            color: #64748b;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        /* 頂部狀態列 */
+        .top-status {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 50;
+            background: rgba(0,0,0,0.6);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            pointer-events: none;
+        }
+        .red-dot { width: 8px; height: 8px; background: #ef4444; border-radius: 50%; animation: pulse 1s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
+    </style>
+</head>
+<body>
+
+    <!-- 頂部狀態顯示 (不可點擊) -->
+    <div class="top-status">
+        <div class="red-dot"></div>
+        <span id="statusInfo">模式：初始化中/AI．OT Wei</span>
+    </div>
+
+    <!-- 畫面區 -->
+    <div id="displayArea" onclick="expandPanel()">
+        <canvas id="mainCanvas"></canvas>
+        <video id="videoElement" style="display:none" playsinline autoplay muted></video>
+        <div id="delayHint" style="display:none" class="absolute text-8xl font-black text-white/10 pointer-events-none">3s</div>
+    </div>
+
+    <!-- 控制面版 (最高層級) -->
+    <div id="controlPanel" class="">
+        <!-- 切換按鈕：永遠可點擊 -->
+        <div id="toggleBtn" onclick="togglePanel(event)">
+            <svg id="arrowIcon" class="transition-transform duration-300" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+            <span id="toggleLabel">收合設定選單</span>
+        </div>
+
+        <!-- 內容區域 -->
+        <div id="menuContent">
+            
+            <!-- 1. 健側手 -->
+            <label class="section-label">1. 設定健側手</label>
+            <div class="btn-group">
+                <div class="btn-item" id="sideLeft" onclick="changeState({healthySide:'left'})">左手</div>
+                <div class="btn-item active" id="sideRight" onclick="changeState({healthySide:'right'})">右手</div>
+            </div>
+
+            <!-- 2. 顯示模式 -->
+            <label class="section-label">2. 鏡像顯示模式</label>
+            <div class="btn-group">
+                <div class="btn-item active" id="modeSingle" onclick="changeState({mode:'single'})">健側</div>
+                <div class="btn-item" id="modeMirror" onclick="changeState({mode:'mirror'})">患側</div>
+                <div class="btn-item" id="modeDouble" onclick="changeState({mode:'double'})">雙手</div>
+            </div>
+
+            <!-- 3. 時間 -->
+            <label class="section-label">3. 時間回饋</label>
+            <div class="btn-group">
+                <div class="btn-item active" id="delay0" onclick="changeState({delay:0})">即時</div>
+                <div class="btn-item" id="delay3" onclick="changeState({delay:3})">延遲 3秒</div>
+            </div>
+
+            <!-- 4. 設備 -->
+            <label class="section-label">4. 相機鏡頭選取</label>
+            <div class="flex gap-2">
+                <select id="cameraSelector" onchange="switchCamera(this.value)">
+                    <option>載入鏡頭中...</option>
+                </select>
+                <button onclick="cycleCam()" class="bg-slate-700 px-6 rounded-xl">🔄</button>
+            </div>
+
+            <div class="mt-6 text-[10px] text-slate-500 text-center font-mono">
+                AI．OT Wei Virtual Mirror System Active | Resolving: <span id="resText">--</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 核心狀態 ---
+        const state = {
+            healthySide: 'right',
+            mode: 'single',
+            delay: 0,
+            isCollapsed: false,
+            frameBuffer: [],
+            devices: [],
+            currentCamIdx: 0
+        };
+
+        const canvas = document.getElementById('mainCanvas');
+        const ctx = canvas.getContext('2d', { alpha: false });
+        const video = document.getElementById('videoElement');
+
+        // --- 初始化相機 ---
+        async function initApp() {
+            try {
+                await startStream();
+                const devs = await navigator.mediaDevices.enumerateDevices();
+                state.devices = devs.filter(d => d.kind === 'videoinput');
+                
+                const select = document.getElementById('cameraSelector');
+                select.innerHTML = '';
+                state.devices.forEach((d, i) => {
+                    const opt = document.createElement('option');
+                    opt.value = d.deviceId;
+                    opt.text = d.label || `Camera ${i+1}`;
+                    select.appendChild(opt);
+                });
+                
+                requestAnimationFrame(renderLoop);
+            } catch (err) {
+                alert("相機開啟失敗，請檢查權限並使用 HTTPS。");
+            }
+        }
+
+        async function startStream(deviceId = null) {
+            if (window.stream) window.stream.getTracks().forEach(t => t.stop());
+            const constraints = {
+                video: deviceId ? { deviceId: { exact: deviceId } } : { facingMode: 'user' },
+                audio: false
+            };
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            window.stream = stream;
+            video.srcObject = stream;
+            await video.play();
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            document.getElementById('resText').innerText = `${canvas.width}x${canvas.height}`;
+        }
+
+        async function switchCamera(id) {
+            await startStream(id);
+        }
+
+        async function cycleCam() {
+            if (state.devices.length < 2) return;
+            state.currentCamIdx = (state.currentCamIdx + 1) % state.devices.length;
+            const id = state.devices[state.currentCamIdx].deviceId;
+            await startStream(id);
+            document.getElementById('cameraSelector').value = id;
+        }
+
+        // --- UI 操作 ---
+        function togglePanel(e) {
+            if(e) e.stopPropagation();
+            state.isCollapsed = !state.isCollapsed;
+            const panel = document.getElementById('controlPanel');
+            const arrow = document.getElementById('arrowIcon');
+            const label = document.getElementById('toggleLabel');
+
+            if (state.isCollapsed) {
+                panel.classList.add('panel-collapsed');
+                arrow.style.transform = 'rotate(180deg)';
+                label.innerText = '點擊展開選單';
+            } else {
+                panel.classList.remove('panel-collapsed');
+                arrow.style.transform = 'rotate(0deg)';
+                label.innerText = '收合設定選單';
+            }
+        }
+
+        function expandPanel() {
+            if (state.isCollapsed) togglePanel();
+        }
+
+        function changeState(update) {
+            Object.assign(state, update);
+            state.frameBuffer = []; // 重設延遲緩衝
+
+            // 更新按鈕外觀
+            const btnIds = ['sideLeft', 'sideRight', 'modeSingle', 'modeMirror', 'modeDouble', 'delay0', 'delay3'];
+            btnIds.forEach(id => {
+                const el = document.getElementById(id);
+                el.classList.remove('active');
+            });
+
+            document.getElementById(`side${state.healthySide.charAt(0).toUpperCase() + state.healthySide.slice(1)}`).classList.add('active');
+            document.getElementById(`mode${state.mode.charAt(0).toUpperCase() + state.mode.slice(1)}`).classList.add('active');
+            document.getElementById(`delay${state.delay}`).classList.add('active');
+
+            // 更新頂部資訊
+            const modeMap = { single: '健側模式', mirror: '患側鏡像', double: '雙手同步' };
+            document.getElementById('statusInfo').innerText = `模式：${modeMap[state.mode]} | ${state.delay > 0 ? '3秒延遲' : '即時'}`;
+            document.getElementById('delayHint').style.display = state.delay > 0 ? 'block' : 'none';
+        }
+
+        // --- 繪圖核心 ---
+        let lastTime = 0;
+        function renderLoop(now) {
+            const fps = 1000 / (now - lastTime);
+            lastTime = now;
+
+            // 建立緩衝影格
+            const off = document.createElement('canvas');
+            off.width = canvas.width; off.height = canvas.height;
+            off.getContext('2d').drawImage(video, 0, 0);
+            state.frameBuffer.push(off);
+
+            // 處理延遲 (假設 30fps)
+            const targetSize = state.delay > 0 ? (fps > 5 ? Math.round(fps * state.delay) : 90) : 1;
+            while (state.frameBuffer.length > targetSize) state.frameBuffer.shift();
+
+            const frame = state.frameBuffer[0];
+            if (frame) {
+                const w = canvas.width;
+                const h = canvas.height;
+                const hw = w / 2;
+                ctx.clearRect(0, 0, w, h);
+                ctx.save();
+
+                if (state.mode === 'single') {
+                    ctx.drawImage(frame, 0, 0, w, h);
+                } 
+                else if (state.mode === 'mirror') {
+                    ctx.scale(-1, 1);
+                    ctx.drawImage(frame, -w, 0, w, h);
+                } 
+                else if (state.mode === 'double') {
+                    if (state.healthySide === 'right') {
+                        ctx.drawImage(frame, hw, 0, hw, h, hw, 0, hw, h); // 原右
+                        ctx.save();
+                        ctx.translate(hw, 0); ctx.scale(-1, 1);
+                        ctx.drawImage(frame, hw, 0, hw, h, 0, 0, hw, h); // 鏡右
+                        ctx.restore();
+                    } else {
+                        ctx.drawImage(frame, 0, 0, hw, h, 0, 0, hw, h); // 原左
+                        ctx.save();
+                        ctx.translate(hw, 0); ctx.scale(-1, 1);
+                        ctx.drawImage(frame, 0, 0, hw, h, -hw, 0, hw, h); // 鏡左
+                        ctx.restore();
+                    }
+                    // 分隔線
+                    ctx.strokeStyle = "rgba(255,255,255,0.3)";
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([10, 10]);
+                    ctx.beginPath(); ctx.moveTo(hw, 0); ctx.lineTo(hw, h); ctx.stroke();
+                }
+                ctx.restore();
+            }
+            requestAnimationFrame(renderLoop);
+        }
+
+        window.onload = initApp;
+    </script>
+</body>
+</html>
